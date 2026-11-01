@@ -1,0 +1,119 @@
+name: Build phone app new
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Accept Android SDK licenses
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | "$ANDROID_SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager --licenses
+
+      - name: Install needed Android packages
+        shell: bash
+        run: |
+          set -euxo pipefail
+          "$ANDROID_SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
+
+      - name: Download game release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          gh release download --repo "${{ github.repository }}" --pattern "zip2apk.zip" --dir .
+
+      - name: Unpack archive and locate project
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          ls -l
+
+          if [ ! -f zip2apk.zip ]; then
+            echo "zip2apk.zip was not downloaded"
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -q zip2apk.zip -d extracted
+
+          echo "Archive contents:"
+          find extracted -maxdepth 4 -print | sort
+
+          PROJECT_ROOT="$(find extracted -type d -name mc-bedrock | head -n 1 || true)"
+
+          if [ -z "${PROJECT_ROOT}" ]; then
+            echo "mc-bedrock directory was not found in the archive."
+            exit 1
+          fi
+
+          echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+
+      - name: Build game
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "$PROJECT_ROOT"
+          npm install
+          if [ -f "tools/build-mobile.mjs" ]; then
+            node tools/build-mobile.mjs
+          else
+            echo "tools/build-mobile.mjs was not found in $PROJECT_ROOT"
+            find . -maxdepth 3 -print
+            exit 1
+          fi
+
+      - name: Sync Capacitor
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "$PROJECT_ROOT/mobile"
+          npm install
+          npx cap sync android
+
+      - name: Assemble debug APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "$PROJECT_ROOT/mobile/android"
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxel-mobile-apk
+          path: ${{ env.PROJECT_ROOT }}/mobile/android/app/build/outputs/apk/debug/app-debug.apk
