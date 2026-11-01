@@ -1,0 +1,19 @@
+name: Build phone app
+on: [workflow_dispatch]
+permissions: { contents: read }
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+      - run: gh release download --repo ${{ github.repository }} --pattern Game.zip
+        env: { GH_TOKEN: "${{ github.token }}" }
+      - run: unzip -q Game.zip && cd mc-bedrock && npm install && node tools/build-mobile.mjs
+      - run: cd mc-bedrock/mobile && npm install && npx cap sync android
+      - run: cd mc-bedrock/mobile/android && chmod +x gradlew && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with: { name: voxel-mobile-apk, path: mc-bedrock/mobile/android/app/build/outputs/apk/debug/app-debug.apk }
