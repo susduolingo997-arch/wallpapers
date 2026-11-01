@@ -1,0 +1,70 @@
+name: Build phone app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Accept Android SDK licenses
+        run: |
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses
+
+      - name: Install needed Android packages
+        run: |
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
+
+      - name: Download game release
+        run: gh release download --repo ${{ github.repository }} --pattern Game.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build game
+        run: |
+          unzip -q Game.zip
+          cd mc-bedrock
+          npm install
+          node tools/build-mobile.mjs
+
+      - name: Sync Capacitor
+        run: |
+          cd mc-bedrock/mobile
+          npm install
+          npx cap sync android
+
+      - name: Assemble debug APK
+        run: |
+          cd mc-bedrock/mobile/android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxel-mobile-apk
+          path: mc-bedrock/mobile/android/app/build/outputs/apk/debug/app-debug.apk
